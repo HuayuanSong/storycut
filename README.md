@@ -18,7 +18,7 @@ models:
 
 # Storycut
 
-Turn a topic into an editable, narrated short video. Inspired by the topic-to-video workflow in [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo), with a new Gradio interface and a small pipeline designed for Hugging Face ZeroGPU.
+Turn a topic into an editable, narrated short video, with a Gradio interface and a small pipeline designed for Hugging Face ZeroGPU.
 
 Write a topic, review the AI storyboard, then export a portrait or landscape MP4 with photography, gentle motion, speech, and captions. The download bundle includes the storyboard, SRT subtitles, and image credits. The example storyboard is explicitly labelled as prewritten.
 
