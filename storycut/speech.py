@@ -41,7 +41,9 @@ def chunks(text: str) -> list[str]:
     return result
 
 
-def narrate(text: str, voice: str, destination: Path) -> tuple[float, list[tuple[float, float, str]]]:
+@lru_cache(maxsize=16)
+def synthesize(text: str, voice: str) -> tuple[np.ndarray, int, tuple[tuple[float, float, str], ...]]:
+    """Reuse bounded, in-memory speech between duration checks and rendering."""
     if voice not in VOICES:
         raise ValueError("Choose a voice from the list.")
     voice_id, lang = VOICES[voice]
@@ -58,5 +60,23 @@ def narrate(text: str, voice: str, destination: Path) -> tuple[float, list[tuple
         elapsed += duration + 0.12
     if not pieces or elapsed > 40:
         raise ValueError("This scene is too long. Shorten its narration and try again.")
-    sf.write(destination, np.concatenate(pieces), sample_rate)
-    return elapsed, captions
+    audio = np.concatenate(pieces)
+    audio.setflags(write=False)
+    return audio, sample_rate, tuple(captions)
+
+
+def narrate(text: str, voice: str, destination: Path) -> tuple[float, list[tuple[float, float, str]]]:
+    audio, sample_rate, captions = synthesize(text, voice)
+    sf.write(destination, audio, sample_rate)
+    return len(audio) / sample_rate, list(captions)
+
+
+def measure_narration(texts: list[str], voice: str, destination: Path | None = None) -> list[float]:
+    """Measure real speech; optionally save an unadjusted listening preview."""
+    speech = [synthesize(text, voice) for text in texts]
+    if destination is not None:
+        rates = {rate for _, rate, _ in speech}
+        if len(rates) != 1:
+            raise ValueError("Narration sample rates did not match. Please try again.")
+        sf.write(destination, np.concatenate([audio for audio, _, _ in speech]), rates.pop())
+    return [len(audio) / rate for audio, rate, _ in speech]

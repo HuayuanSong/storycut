@@ -3,7 +3,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from storycut.storyboard import EXAMPLE, Storyboard, from_editor, parse_generation
+from storycut.storyboard import EXAMPLE, MAX_WORDS, Storyboard, from_editor, parse_generation
 
 
 def test_fenced_model_output_becomes_editable_board():
@@ -24,6 +24,16 @@ def test_renderer_input_cannot_expand_without_bound():
         Storyboard.model_validate(data)
     with pytest.raises(ValueError):
         from_editor("Too many scenes", EXAMPLE.rows() * 2)
+
+
+def test_total_word_limit_allows_sixty_second_scripts_but_stays_bounded():
+    data = EXAMPLE.model_dump()
+    for scene in data["scenes"]:
+        scene["narration"] = "word " * (MAX_WORDS // 4)
+    assert Storyboard.model_validate(data).word_count == MAX_WORDS
+    data["scenes"][0]["narration"] += "extra"
+    with pytest.raises(ValidationError, match="220 words"):
+        Storyboard.model_validate(data)
 
 
 def test_editor_does_not_drop_missing_or_extra_columns():

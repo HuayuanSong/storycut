@@ -1,7 +1,6 @@
 """CPU assembly with optional generated motion, speech timings, and export bundle."""
 
 import json
-import math
 import os
 import secrets
 import shutil
@@ -18,10 +17,10 @@ from storycut.media import commons_visual, upload_visual
 from storycut.motion import make_motion_clip
 from storycut.speech import narrate
 from storycut.storyboard import Storyboard
+from storycut.timing import FPS, plan_timing, validate_target
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUTS = ROOT / "outputs"
-FPS = 24
 FORMATS = {"Portrait · 9:16": (720, 1280), "Landscape · 16:9": (1280, 720)}
 
 
@@ -103,7 +102,8 @@ def clean_old_exports():
 
 
 def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[str] | None,
-                      progress=lambda *_: None, *, ai_motion: bool = False
+                      progress=lambda *_: None, *, ai_motion: bool = False,
+                      target_seconds: int | None = None
                       ) -> tuple[str, str, list[tuple[str, str]], dict]:
     if aspect not in FORMATS:
         raise ValueError("Choose portrait or landscape.")
@@ -111,6 +111,8 @@ def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[
         raise ValueError(f"Upload exactly {len(board.scenes)} images, one per scene in order, or leave uploads empty.")
     if not isinstance(ai_motion, bool):
         raise ValueError("Choose whether to enable AI motion.")
+    if target_seconds is not None:
+        validate_target(target_seconds)
     clean_old_exports()
     job = Path(tempfile.mkdtemp(prefix="video-", dir=OUTPUTS))
     width, height = FORMATS[aspect]
@@ -119,10 +121,16 @@ def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[
     used, offset = set(), 0.0
     start = time.monotonic()
     try:
-        visuals = []
-        # Resolve every image first, before spending CPU on narration and encoding.
+        speech = []
         for index, scene in enumerate(board.scenes):
-            progress(index / len(board.scenes) * 0.15, f"Finding image {index+1}/{len(board.scenes)}")
+            progress(index / len(board.scenes) * 0.15,
+                     f"Checking narration length · scene {index+1}/{len(board.scenes)}")
+            speech.append(narrate(scene.narration, voice, job / f"scene-{index:02d}.wav"))
+        # Reject large mismatches before image requests, GPU motion or encoding.
+        plan = plan_timing([duration for duration, _ in speech], target_seconds)
+        visuals = []
+        for index, scene in enumerate(board.scenes):
+            progress(0.15 + index / len(board.scenes) * 0.15, f"Finding image {index+1}/{len(board.scenes)}")
             destination = job / f"scene-{index:02d}.jpg"
             visuals.append(upload_visual(uploads[index], destination) if uploads
                            else commons_visual(scene.visual_query, destination, used))
@@ -133,12 +141,12 @@ def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[
             thumbnails.append((str(visual.path), f"{index+1}. {scene.heading}"))
             with Image.open(visual.path) as image:
                 ImageOps.fit(image, (width, height)).save(job / f"{prefix}-crop.jpg", quality=94)
-            progress(0.15 + (index + 0.1) / len(board.scenes) * 0.8, f"Scene {index+1}/{len(board.scenes)} · recording narration")
-            duration, captions = narrate(scene.narration, voice, job / f"{prefix}.wav")
-            frame_count = math.ceil(duration * FPS)
+            captions = [(begin / plan.tempo, end / plan.tempo, text)
+                        for begin, end, text in speech[index][1]]
+            frame_count = plan.scene_frames[index]
             video_duration = frame_count / FPS
             if ai_motion:
-                progress(0.15 + (index + 0.3) / len(board.scenes) * 0.8,
+                progress(0.3 + (index + 0.1) / len(board.scenes) * 0.65,
                          f"Scene {index+1}/{len(board.scenes)} · generating AI motion (GPU queue may apply)")
                 details = make_motion_clip(visual.path, scene, (width, height),
                                            job / f"{prefix}-motion.mp4", secrets.randbelow(2**31))
@@ -146,8 +154,8 @@ def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[
                 arguments = ["-i", f"{prefix}-motion.mp4", "-i", f"{prefix}.wav"]
                 # Play each short generated shot once, adapting its speed to the narration.
                 # Pad the final frame for timestamp rounding before trimming to exact duration.
-                speed = video_duration / details["duration_seconds"]
-                filters = [f"[0:v]setpts={speed:.9f}*(PTS-STARTPTS),fps={FPS},"
+                playback_scale = video_duration / details["duration_seconds"]
+                filters = [f"[0:v]setpts={playback_scale:.9f}*(PTS-STARTPTS),fps={FPS},"
                            f"scale={width}:{height}:flags=lanczos,setsar=1,"
                            f"tpad=stop_mode=clone:stop_duration={video_duration},"
                            f"trim=duration={video_duration}[bg0]"]
@@ -162,17 +170,20 @@ def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[
                 name = f"{prefix}-caption-{number}.png"
                 overlay(job / name, (width, height), scene.heading, caption, index + 1,
                         len(board.scenes), ai_motion=ai_motion)
-                arguments += ["-loop", "1", "-framerate", str(FPS), "-i", name]
+                # Overlay repeats the final image by default. Decode each PNG
+                # once; looping every caption creates unnecessary input queues.
+                arguments += ["-i", name]
                 visible_end = captions[number+1][0] if number+1 < len(captions) else video_duration
                 filters.append(f"[bg{number}][{number+2}:v]overlay=enable='gte(t,{begin})*lt(t,{visible_end})'[bg{number+1}]")
                 caption_rows.append((offset + begin, offset + end, caption))
             filters.append(f"[bg{len(captions)}]format=yuv420p[v]")
-            filters.append(f"[1:a]apad,atrim=duration={video_duration},asetpts=PTS-STARTPTS[a]")
+            tempo_filter = f"atempo={plan.tempo:.12f}," if plan.tempo != 1.0 else ""
+            filters.append(f"[1:a]{tempo_filter}apad,atrim=duration={video_duration},asetpts=PTS-STARTPTS[a]")
             arguments += ["-filter_complex_threads", "1", "-filter_complex", ";".join(filters),
                           "-map", "[v]", "-map", "[a]", "-t", str(video_duration),
                           "-c:v", "libx264", "-threads", "2", "-preset", "veryfast", "-crf", "23",
                           "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "1", f"{prefix}.mkv"]
-            progress(0.15 + (index + 0.5) / len(board.scenes) * 0.8, f"Scene {index+1}/{len(board.scenes)} · rendering")
+            progress(0.3 + (index + 0.5) / len(board.scenes) * 0.65, f"Scene {index+1}/{len(board.scenes)} · rendering")
             run_ffmpeg(arguments, job)
             offset += video_duration
             timings.append(video_duration)
@@ -197,8 +208,12 @@ def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[
         (job / "credits.txt").write_text(credit_text, encoding="utf-8")
         if ai_motion:
             (job / "motion.json").write_text(json.dumps(motion_details, indent=2), encoding="utf-8")
+        timing_details = {"target_seconds": target_seconds, "narration_seconds": round(plan.narration_seconds, 3),
+                          "speech_tempo": plan.tempo, "scene_seconds": timings,
+                          "duration_seconds": round(offset, 3)}
+        (job / "timing.json").write_text(json.dumps(timing_details, indent=2), encoding="utf-8")
         with zipfile.ZipFile(job / "storycut-bundle.zip", "w", zipfile.ZIP_DEFLATED) as bundle:
-            for name in ("storycut.mp4", "captions.srt", "storyboard.json", "credits.txt"):
+            for name in ("storycut.mp4", "captions.srt", "storyboard.json", "credits.txt", "timing.json"):
                 bundle.write(job / name, name)
             if ai_motion:
                 bundle.write(job / "motion.json", "motion.json")
@@ -209,7 +224,9 @@ def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[
         (job / "concat.txt").unlink()
         progress(1, "Your video is ready")
         stats = {"duration_seconds": round(offset, 2), "render_seconds": round(time.monotonic()-start, 2),
-                 "scene_seconds": timings, "credits": credits, "ai_motion": ai_motion}
+                 "scene_seconds": timings, "credits": credits, "ai_motion": ai_motion,
+                 "target_seconds": target_seconds, "narration_seconds": plan.narration_seconds,
+                 "speech_tempo": plan.tempo}
         return str(job / "storycut.mp4"), str(job / "storycut-bundle.zip"), thumbnails, stats
     except BaseException:
         shutil.rmtree(job, ignore_errors=True)

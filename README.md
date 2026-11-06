@@ -22,6 +22,8 @@ Turn a topic into an editable, narrated short video. Inspired by the topic-to-vi
 
 Write a topic, review the AI storyboard, then export a portrait or landscape MP4 with photography, gentle motion, speech, and captions. The download bundle includes the storyboard, SRT subtitles, and image credits. The example storyboard is explicitly labelled as prewritten.
 
+Choose a 30-, 45-, or 60-second target. **Check narration length** measures real speech with your selected voice and provides a listening preview. Small differences are fitted with pitch-preserving tempo changes of at most 10% and, when needed, up to 0.35 seconds of extra pause per scene. Larger mismatches stop before images or video generation. **Expand/Shorten script to fit** proposes a revision for review; **Use this revision** applies it. Your existing script remains intact until then.
+
 Enable **Animate images with AI** in the editor for generated moving footage. LTX-Video uses each source image and its scene's heading, narration and image-search subject to create a short shot. The option is off by default; photo mode remains available without a video-generation GPU call.
 
 ## How it works
@@ -30,14 +32,17 @@ Enable **Animate images with AI** in the editor for generated moving footage. LT
 flowchart TD
     U[Topic + optional source notes] --> UI[Gradio interface on Hugging Face Spaces]
     UI --> Q[Qwen3 4B Instruct · ZeroGPU]
-    Q --> V[Validate JSON storyboard]
+    Q --> V[Validate JSON and word budget · at most one correction]
     V --> E[User edits headings, narration and image searches]
     E --> I[Wikimedia Commons API or uploaded images]
     E --> K[Kokoro 82M ONNX · CPU narration]
     I --> P[Pillow · crop images and draw overlays]
     I --> L[Optional LTX-Video 2B distilled · ZeroGPU]
     E --> L
-    K --> T[Caption timings from generated speech chunks]
+    K --> C[Measure speech against selected duration]
+    C --> R[Large mismatch · offer a revision for review]
+    R --> Q
+    C --> T[Fit small gaps · adjust speech and caption timings]
     P --> F[FFmpeg · CPU video assembly]
     L --> F
     T --> F
@@ -74,11 +79,12 @@ Free ZeroGPU hosting requires an eligible personal account with verified email a
 
 ## Scope and limits
 
-- English narration, 2–6 editable scenes, at most 180 spoken words, 720p portrait or landscape at 24 fps. Length choices guide the script; the final duration follows actual speech.
+- English narration, 2–6 editable scenes, at most 220 spoken words, 720p portrait or landscape at 24 fps. The initial word budget estimates Kokoro's speaking pace; real audio determines whether the script fits. Accepted scripts fit the chosen length within 0.25 seconds of scene-frame rounding. A script that cannot fit with modest pacing changes must be revised or given another target; it is never silently exported at a substantially different length.
 - Photo mode adds gentle zoom. Optional AI motion generates 97 frames at 24 fps per scene (about four seconds), at 512×288 or 288×512, then adjusts playback to the narration and upscales to the 720p export. This is not native 720p generation. It can change image details and is labelled as AI-generated in the video. It does not include music, stock-video search, or video uploads.
 - Automatic visuals come from Wikimedia Commons. Search tries a broader subject when necessary and selects public-domain, CC0, or CC BY images. Results are illustrative and need visual review. Upload one JPEG/PNG/WebP per scene to control the images.
 - Source notes are optional pasted text; URLs are not fetched. The script is a draft, not a fact-checked report.
-- Captions align to short generated speech chunks, not individual words. Re-rendering edited scenes does not call the LLM again.
+- Captions align to short generated speech chunks, not individual words, and follow any tempo adjustment. Re-rendering edited scenes does not call the LLM. Drafting may make one correction pass within its existing GPU lease; requesting a suggested revision uses a separate bounded call. A suggested revision can still need editing, so its actual narration length is measured and shown before acceptance.
+- Speech is cached for up to 16 scene/voice combinations in memory, so checking length and then rendering usually reuses the same audio. Changing narration or narrator generates fresh speech. The listening preview uses natural pacing; the final export applies the indicated timing adjustments. Every bundle includes `timing.json` with the target, measured narration, tempo and scene timings.
 - Temporary exports are removed after 24 hours when another render begins. The Gradio file cache also expires. Save your downloads; Spaces storage is ephemeral.
 - Rendering is queued one job at a time. Storyboard writing has a separate queue. AI motion releases the GPU after each scene's inference; photo mode never requests one. If AI motion fails or quota runs out, the app reports the failure rather than silently substituting photos. Turn the option off to render without video-model inference.
 - AI-motion bundles also contain `motion.json` with checkpoint revision, prompts, seeds and clip settings. Generated visuals are interpretations of the source photographs; keep their credits. They are not documentary footage.
@@ -90,7 +96,7 @@ Free ZeroGPU hosting requires an eligible personal account with verified email a
 .venv/bin/python -m pytest -q
 ```
 
-Tests cover malformed model responses, bounded input, image validation, licensing filters, caption timestamps, failed-job cleanup, and actual FFmpeg exports in both orientations and visual modes. Offline AI-motion tests use synthetic moving frames; an actual hosted model generation is a separate smoke test.
+Tests cover malformed model responses, bounded correction, revision acceptance, speech-cache invalidation, timing mismatch rejection, image validation, licensing filters, caption timestamps, failed-job cleanup, and actual FFmpeg exports. Timed exports check 30/45/60-second output, subtitle retiming, preserved audio pitch and the final spoken audio. Offline AI-motion tests use synthetic moving frames; an actual hosted model generation is a separate smoke test.
 
 `STORYCUT_MODEL` and `STORYCUT_MODEL_REVISION` can select another compatible Transformers model. Default text/speech models are revision-pinned; dependencies are version-pinned. `STORYCUT_DEVICE` overrides local device selection. `PORT` changes the local listening port.
 

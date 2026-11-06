@@ -5,6 +5,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+MAX_WORDS = 220
 
 class Scene(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -36,8 +37,8 @@ class Storyboard(BaseModel):
 
     @model_validator(mode="after")
     def limit_length(self):
-        if sum(len(scene.narration.split()) for scene in self.scenes) > 180:
-            raise ValueError("Keep the narration to 180 words or fewer across all scenes.")
+        if sum(len(scene.narration.split()) for scene in self.scenes) > MAX_WORDS:
+            raise ValueError(f"Keep the narration to {MAX_WORDS} words or fewer across all scenes.")
         return self
 
     @property
@@ -74,5 +75,5 @@ EXAMPLE = Storyboard(title="The quiet power of a walk", scenes=[
     Scene(heading="Step outside", narration="Some days, a change of scenery starts with a single step. Leave the screen behind and take a short walk.", visual_query="forest walking path"),
     Scene(heading="Notice the small things", narration="Look for the details you usually miss: light through the leaves, a familiar street, or the rhythm of your footsteps.", visual_query="sunlight forest leaves"),
     Scene(heading="Make room to think", narration="You do not need a destination or a perfect route. Give yourself a few minutes with nowhere urgent to be.", visual_query="park footpath"),
-    Scene(heading="Come back refreshed", narration="Start small. Choose a nearby path, put on comfortable shoes, and see how a little movement changes your afternoon.", visual_query="green park landscape"),
+    Scene(heading="Come back refreshed", narration="Start small. Choose a nearby path, put on comfortable shoes, and see how a little movement changes your afternoon. Take your time.", visual_query="green park landscape"),
 ])
