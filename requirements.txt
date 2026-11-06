@@ -11,3 +11,5 @@ pydantic==2.12.5
 httpx==0.28.1
 onnxruntime==1.31.1
 huggingface-hub==2.4.0
+diffusers==0.42.1
+sentencepiece==0.2.3

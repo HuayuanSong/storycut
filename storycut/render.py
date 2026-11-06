@@ -1,8 +1,9 @@
-"""Bounded CPU video renderer: motion, real speech timings, and export bundle."""
+"""CPU assembly with optional generated motion, speech timings, and export bundle."""
 
 import json
 import math
 import os
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -14,6 +15,7 @@ import imageio_ffmpeg
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from storycut.media import commons_visual, upload_visual
+from storycut.motion import make_motion_clip
 from storycut.speech import narrate
 from storycut.storyboard import Storyboard
 
@@ -48,7 +50,8 @@ def wrap(text: str, face, width: int) -> list[str]:
     return [*lines, current] if current else lines
 
 
-def overlay(path: Path, size: tuple[int, int], heading: str, caption: str, index: int, count: int):
+def overlay(path: Path, size: tuple[int, int], heading: str, caption: str, index: int, count: int,
+            ai_motion: bool = False):
     width, height = size
     image = Image.new("RGBA", size)
     draw = ImageDraw.Draw(image)
@@ -60,6 +63,8 @@ def overlay(path: Path, size: tuple[int, int], heading: str, caption: str, index
     margin = 54
     draw.rounded_rectangle((margin, 50, margin + 92, 88), radius=12, fill="#e4f6b2")
     draw.text((margin + 15, 56), f"{index:02d} / {count:02d}", font=font(21, True), fill="#18262b")
+    if ai_motion:
+        draw.text((width - margin, 60), "AI-GENERATED VISUALS", anchor="ra", font=font(19), fill="white")
     heading_face = font(42 if height > width else 38, True)
     for row, line in enumerate(wrap(heading, heading_face, width - margin * 2)):
         draw.text((margin, 112 + row * 53), line, font=heading_face, fill="white")
@@ -98,15 +103,19 @@ def clean_old_exports():
 
 
 def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[str] | None,
-                      progress=lambda *_: None) -> tuple[str, str, list[tuple[str, str]], dict]:
+                      progress=lambda *_: None, *, ai_motion: bool = False
+                      ) -> tuple[str, str, list[tuple[str, str]], dict]:
     if aspect not in FORMATS:
         raise ValueError("Choose portrait or landscape.")
     if uploads and len(uploads) != len(board.scenes):
         raise ValueError(f"Upload exactly {len(board.scenes)} images, one per scene in order, or leave uploads empty.")
+    if not isinstance(ai_motion, bool):
+        raise ValueError("Choose whether to enable AI motion.")
     clean_old_exports()
     job = Path(tempfile.mkdtemp(prefix="video-", dir=OUTPUTS))
     width, height = FORMATS[aspect]
     credits, thumbnails, caption_rows, timings = [], [], [], []
+    motion_details = []
     used, offset = set(), 0.0
     start = time.monotonic()
     try:
@@ -128,15 +137,31 @@ def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[
             duration, captions = narrate(scene.narration, voice, job / f"{prefix}.wav")
             frame_count = math.ceil(duration * FPS)
             video_duration = frame_count / FPS
-            arguments = ["-loop", "1", "-framerate", str(FPS), "-i", f"{prefix}-crop.jpg",
-                         "-i", f"{prefix}.wav"]
-            filters = [f"[0:v]zoompan=z='1+0.045*on/{frame_count}':"
-                       f"x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s={width}x{height}:fps={FPS}[bg0]"]
+            if ai_motion:
+                progress(0.15 + (index + 0.3) / len(board.scenes) * 0.8,
+                         f"Scene {index+1}/{len(board.scenes)} · generating AI motion (GPU queue may apply)")
+                details = make_motion_clip(visual.path, scene, (width, height),
+                                           job / f"{prefix}-motion.mp4", secrets.randbelow(2**31))
+                motion_details.append(details)
+                arguments = ["-i", f"{prefix}-motion.mp4", "-i", f"{prefix}.wav"]
+                # Play each short generated shot once, adapting its speed to the narration.
+                # Pad the final frame for timestamp rounding before trimming to exact duration.
+                speed = video_duration / details["duration_seconds"]
+                filters = [f"[0:v]setpts={speed:.9f}*(PTS-STARTPTS),fps={FPS},"
+                           f"scale={width}:{height}:flags=lanczos,setsar=1,"
+                           f"tpad=stop_mode=clone:stop_duration={video_duration},"
+                           f"trim=duration={video_duration}[bg0]"]
+            else:
+                arguments = ["-loop", "1", "-framerate", str(FPS), "-i", f"{prefix}-crop.jpg",
+                             "-i", f"{prefix}.wav"]
+                filters = [f"[0:v]zoompan=z='1+0.045*on/{frame_count}':"
+                           f"x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s={width}x{height}:fps={FPS}[bg0]"]
             # One PNG per spoken phrase. Each caption is tied to its own generated audio.
             # The last overlay also covers the tiny trailing silence/frame rounding.
             for number, (begin, end, caption) in enumerate(captions):
                 name = f"{prefix}-caption-{number}.png"
-                overlay(job / name, (width, height), scene.heading, caption, index + 1, len(board.scenes))
+                overlay(job / name, (width, height), scene.heading, caption, index + 1,
+                        len(board.scenes), ai_motion=ai_motion)
                 arguments += ["-loop", "1", "-framerate", str(FPS), "-i", name]
                 visible_end = captions[number+1][0] if number+1 < len(captions) else video_duration
                 filters.append(f"[bg{number}][{number+2}:v]overlay=enable='gte(t,{begin})*lt(t,{visible_end})'[bg{number+1}]")
@@ -163,12 +188,20 @@ def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[
             for i, (begin, end, text) in enumerate(caption_rows)), encoding="utf-8")
         (job / "storyboard.json").write_text(board.model_dump_json(indent=2), encoding="utf-8")
         credit_text = "Visual credits\n\nImages were cropped and animated. Keep these credits with the video when sharing.\n\n"
+        if ai_motion:
+            credit_text += ("Visuals are AI-generated interpretations of the credited source images, using "
+                            "Lightricks LTX-Video 2B 0.9.8 distilled. They are not documentary footage.\n"
+                            "Model terms: https://huggingface.co/Lightricks/LTX-Video/blob/main/LTX-Video-Open-Weights-License-0.X.txt\n\n")
         for i, credit in enumerate(credits):
             credit_text += f"Scene {i+1}: {credit['title']}\nCreator: {credit['creator']}\nLicense: {credit['license']} {credit['license_url']}\nSource: {credit['source_url']}\n\n"
         (job / "credits.txt").write_text(credit_text, encoding="utf-8")
+        if ai_motion:
+            (job / "motion.json").write_text(json.dumps(motion_details, indent=2), encoding="utf-8")
         with zipfile.ZipFile(job / "storycut-bundle.zip", "w", zipfile.ZIP_DEFLATED) as bundle:
             for name in ("storycut.mp4", "captions.srt", "storyboard.json", "credits.txt"):
                 bundle.write(job / name, name)
+            if ai_motion:
+                bundle.write(job / "motion.json", "motion.json")
         for path in job.glob("scene-*"):
             if path.name.endswith(".jpg") and "-crop" not in path.name:
                 continue
@@ -176,7 +209,7 @@ def render_storyboard(board: Storyboard, voice: str, aspect: str, uploads: list[
         (job / "concat.txt").unlink()
         progress(1, "Your video is ready")
         stats = {"duration_seconds": round(offset, 2), "render_seconds": round(time.monotonic()-start, 2),
-                 "scene_seconds": timings, "credits": credits}
+                 "scene_seconds": timings, "credits": credits, "ai_motion": ai_motion}
         return str(job / "storycut.mp4"), str(job / "storycut-bundle.zip"), thumbnails, stats
     except BaseException:
         shutil.rmtree(job, ignore_errors=True)
