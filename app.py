@@ -1,5 +1,6 @@
 """Gradio entrypoint, ready for a Hugging Face ZeroGPU Space."""
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -15,6 +16,24 @@ from storycut.storyboard import EXAMPLE, from_editor
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).parent
+
+
+def loading_event(button, feedback, message):
+    """Show feedback in the browser before a queued request reaches the server."""
+    markup = ('<div class="job-status" role="status" aria-live="polite">'
+              '<span class="job-spinner" aria-hidden="true"></span>'
+              f'<span>{message}</span></div>')
+    return button.click(
+        fn=None, outputs=[button, feedback], queue=False,
+        js=f'() => [{{__type__: "update", interactive: false}}, {json.dumps(markup)}]',
+    )
+
+
+def clear_loading(event, button, feedback):
+    # Explicit failure handling also covers Gradio versions whose .then skips errors.
+    for finish in (event.success, event.failure):
+        finish(fn=None, outputs=[button, feedback], queue=False,
+               js='() => [{__type__: "update", interactive: true}, ""]')
 
 
 def draft(topic, notes, tone, seconds, progress=gr.Progress()):
@@ -78,6 +97,7 @@ def build_app():
                         with gr.Accordion("Add source notes · optional", open=False):
                             notes = gr.Textbox(label="Facts you want the script to use", placeholder="Paste a few notes or an excerpt you have permission to use. Links alone are not fetched.", lines=4)
                         write = gr.Button("Write my storyboard  →", variant="primary", size="lg")
+                        write_feedback = gr.HTML("", elem_id="storyboard-progress", elem_classes="job-feedback")
                         example = gr.Button("Explore with an example", variant="secondary")
                     with gr.Column(scale=2, min_width=280):
                         gr.HTML('''<div class="idea-card"><div class="card-top"><span>YOUR MINI STUDIO</span><span>↗</span></div>
@@ -99,6 +119,7 @@ def build_app():
                     uploads = gr.File(label="One image for each scene, in scene order", file_count="multiple", file_types=[".jpg", ".jpeg", ".png", ".webp"], type="filepath")
                     gr.Markdown("Leave this empty to search Wikimedia Commons. Upload images you have permission to use.")
                 render = gr.Button("Make my video  →", variant="primary", size="lg")
+                render_feedback = gr.HTML("", elem_id="video-progress", elem_classes="job-feedback")
                 gr.Markdown("Rendering uses your edited script. It does not ask the LLM to rewrite it. Actual duration follows the narration.")
             with gr.Tab("03 · Watch & download", id="watch"):
                 result = gr.Markdown("Your finished video will appear here.")
@@ -108,11 +129,20 @@ def build_app():
                     gallery = gr.Gallery(label="Scene images", columns=4, height=230, interactive=False)
                 gr.Markdown("Keep **credits.txt** with your video when sharing Commons images. Downloads are temporary; save anything you want to keep.")
         gr.HTML('<footer class="foot"><span>Made with open models. Finished by you.</span><span>Qwen · Kokoro · Wikimedia Commons</span></footer>')
-        write.click(draft, [topic, notes, tone, seconds], [title, editor, status, tabs],
-                    concurrency_limit=1, concurrency_id="writer", api_name="draft")
+        writing = loading_event(write, write_feedback,
+                                "Writing your storyboard… A GPU may need to become available first.")
+        writing = writing.then(draft, [topic, notes, tone, seconds], [title, editor, status, tabs],
+                               concurrency_limit=1, concurrency_id="writer", api_name="draft",
+                               show_progress="minimal", show_progress_on=[write_feedback])
+        clear_loading(writing, write, write_feedback)
         example.click(load_example, outputs=[title, editor, status, tabs], queue=False, api_name=False)
-        render.click(make_video, [title, editor, voice, aspect, uploads], [video, bundle, gallery, result, tabs],
-                     concurrency_limit=1, concurrency_id="renderer", api_name="render")
+        rendering = loading_event(render, render_feedback,
+                                  "Making your video… Finding images, creating narration and assembling your scenes.")
+        rendering = rendering.then(make_video, [title, editor, voice, aspect, uploads],
+                                    [video, bundle, gallery, result, tabs], concurrency_limit=1,
+                                    concurrency_id="renderer", api_name="render",
+                                    show_progress="minimal", show_progress_on=[render_feedback])
+        clear_loading(rendering, render, render_feedback)
         # An old video must never look like the output of newly edited settings.
         def stale():
             return None, None, [], "Your storyboard changed. Render again to see the updated video."
