@@ -1,0 +1,38 @@
+:root { color-scheme: light; }
+body { background: #f6f5ef; }
+.gradio-container { max-width: 1180px !important; margin: auto !important; padding: 28px 32px 20px !important; background: #f6f5ef !important; color: #20352f !important; --body-text-size: 17px; --input-text-size: 17px; --body-background-fill: #f6f5ef; --block-background-fill: #fffef9; --input-background-fill: #fffef9; --border-color-primary: #dcded2; --button-primary-background-fill: #243c32; --button-primary-background-fill-hover: #335744; --button-primary-text-color: #f3ffc6; --button-primary-border-color: #243c32; --button-primary-border-color-hover: #335744; --button-large-text-size: 18px; --block-title-text-size: 16px; --block-label-text-size: 15px; }
+.gradio-container { width: 100% !important; min-width: 0 !important; padding-left: clamp(14px, 2.3vw, 32px) !important; padding-right: clamp(14px, 2.3vw, 32px) !important; }
+#masthead { align-items: center; border-bottom: 1px solid #d9dfce; padding-bottom: 23px; }
+.brand { display: flex; gap: 10px; align-items: center; font-size: 27px; font-weight: 800; letter-spacing: -1.2px; }
+.brand-mark { display: inline-flex; width: 38px; height: 38px; align-items: center; justify-content: center; color: #efffc0; background: #253e34; border-radius: 11px; transform: rotate(-8deg); }
+.beta { margin-left: 12px; border: 1px solid #d2d9c8; border-radius: 20px; padding: 5px 10px; font-size: 10px; letter-spacing: 1.2px; font-weight: 600; }
+.intro { padding: 43px 0 31px; }
+.eyebrow { color: #5e715b; letter-spacing: 2px; font-weight: 700; font-size: 12px; margin-bottom: 14px; }
+.intro h1 { font-size: clamp(39px, 5.3vw, 65px); line-height: 1.04; letter-spacing: -2.9px; font-weight: 650; margin: 0 0 22px; color: #233a30; }
+.intro em { font-family: Georgia, serif; color: #607b45; font-weight: 400; }
+.lede { font-size: 19px; line-height: 1.6; max-width: 630px; color: #586354; margin: 0; }
+.steps { display: flex; flex-wrap: wrap; gap: 23px; align-items: center; margin-top: 30px; font-size: 14px; font-weight: 550; }
+.steps b { color: #8e9c80; font-weight: 400; }
+#workspace { background: #fffef9; border: 1px solid #d9dfce; border-radius: 20px; overflow: hidden; }
+#workspace > .tab-nav { padding: 8px 16px 0; background: #f0f1e8; }
+#workspace > .tabitem { padding: 27px; border: none; }
+.tab-nav button { font-size: 15px !important; padding: 14px 19px !important; }
+.tab-nav button.selected { color: #273e31 !important; border-bottom: 3px solid #65814b !important; }
+button.primary { min-height: 53px; border-radius: 11px !important; box-shadow: none !important; }
+textarea, input { font-size: 17px !important; line-height: 1.6 !important; }
+table td { font-size: 16px !important; line-height: 1.6 !important; }
+table td, table th { font-family: Arial, sans-serif !important; }
+[role="tab"][aria-selected="true"] { color: #3e6137 !important; border-bottom-color: #5e7a47 !important; }
+.idea-card { background: #edf1e2; border-radius: 16px; padding: 21px 23px; height: 100%; box-sizing: border-box; }
+.card-top { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; letter-spacing: 1.4px; color: #53674a; }
+.film-frame { height: 168px; border-radius: 10px; margin: 18px 0; background: #cfdfbf; overflow: hidden; position: relative; }
+.sun { position: absolute; height: 65px; width: 65px; background: #f8f0bd; border-radius: 50%; top: 22px; right: 56px; }
+.hill { position: absolute; width: 120%; height: 150px; background: #4b6b52; border-radius: 50%; bottom: -98px; left: -50px; transform: rotate(-14deg); }
+.hill-back { background: #8eaa76; bottom: -75px; left: 35px; transform: rotate(23deg); }
+.play-icon { position: absolute; top: 48px; left: calc(50% - 21px); width: 43px; height: 43px; background: #ffffffa1; border: 1px solid #fff7; border-radius: 50%; text-align: center; line-height: 43px; color: #304935; }
+.frame-caption { position: absolute; left: 18px; bottom: 16px; font-weight: 600; color: #fff; font-size: 16px; }
+.idea-card h3 { font-size: 25px; letter-spacing: -.8px; line-height: 1.15; margin: 8px 0 12px; }
+.idea-card p { color: #586650; font-size: 15px; line-height: 1.6; }
+#features { margin-top: 20px; color: #5b6953; font-size: 13px; }
+.foot { display: flex; justify-content: space-between; gap: 20px; padding: 23px 0; font-size: 12px; color: #687361; }
+@media (max-width: 650px) { .gradio-container { padding: 18px 14px !important; } .intro { padding: 32px 2px 27px; } .intro h1 { letter-spacing: -1.8px; } .lede { font-size: 17px; } .steps { font-size: 12px; gap: 10px; } #workspace > .tabitem { padding: 17px; } .tab-nav button { padding: 12px 8px !important; font-size: 12px !important; } .foot { flex-direction: column; gap: 5px; } }
