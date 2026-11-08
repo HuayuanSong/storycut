@@ -32,13 +32,24 @@ def check_scrolling(browser, width, height):
             expect(render).to_be_in_viewport()
             render.click(trial=True)  # Check it is clickable without rendering.
 
+        def select_tab(name):
+            tab = app.get_by_role("tab", name=name, exact=True)
+            more_tabs = app.get_by_role("button", name="More tabs", exact=True)
+            if more_tabs.is_visible():
+                # Gradio moves overflowing tabs into a menu on narrow screens.
+                more_tabs.click()
+                tab.or_(app.get_by_role("button", name=name, exact=True)).click()
+            else:
+                tab.click()
+            expect(tab).to_have_attribute("aria-selected", "true")
+
         reach_render()
         app.get_by_text("Use your own images · optional", exact=True).click()
         reach_render()
         app.get_by_role("checkbox", name="Animate images with AI", exact=False).check()
         reach_render()
-        app.get_by_role("tab", name="01 · Start with an idea").click()
-        edit_tab.click()
+        select_tab("01 · Start with an idea")
+        select_tab("02 · Shape your story")
         reach_render()
         print(f"PASS {width}×{height}: editor, image uploads, motion details and tab switching")
     finally:
