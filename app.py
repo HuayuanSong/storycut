@@ -293,5 +293,6 @@ if __name__ == "__main__":
         server_name="0.0.0.0" if IS_SPACE else "127.0.0.1",
         server_port=int(os.getenv("PORT", "7865" if not IS_SPACE else "7860")),
         theme=theme, css_paths=ROOT / "assets/style.css", max_file_size="15mb",
+        js=(ROOT / "assets/resize-embed.js").read_text(),
         allowed_paths=[str(OUTPUTS)], footer_links=[], show_error=False,
     )
