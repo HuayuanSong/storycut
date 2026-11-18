@@ -9,7 +9,8 @@ from huggingface_hub.errors import RepositoryNotFoundError
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / ".cache/deployment.json"
-UPLOADS = ["app.py", "storycut/*.py", "assets/*", "README.md", "LICENSE", "requirements.txt", "packages.txt"]
+UPLOADS = ["app.py", "storycut/*.py", "assets/*", "README.md", "LICENSE", "requirements.txt", "packages.txt",
+           "docs/code-review-*.md"]
 
 
 def main():
@@ -19,7 +20,8 @@ def main():
     args = parser.parse_args()
     if not args.name or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789-" for char in args.name):
         parser.error("Use a lowercase Space name with letters, numbers, and hyphens.")
-    for name in ("app.py", "requirements.txt", "README.md", "assets/style.css", "assets/Figtree.ttf"):
+    for name in ("app.py", "requirements.txt", "packages.txt", "README.md", "LICENSE",
+                 "assets/style.css", "assets/Figtree.ttf", "assets/resize-embed.js", "assets/editor-jobs.js"):
         if not (ROOT / name).is_file():
             raise SystemExit(f"Required deployment file is missing: {name}")
     if args.check:
@@ -52,7 +54,7 @@ def main():
     if hardware != SpaceHardware.ZERO_A10G:
         raise SystemExit(f"The Space is configured as {hardware}, not ZeroGPU. Nothing was uploaded.")
     result = api.upload_folder(repo_id=repo, repo_type="space", folder_path=ROOT,
-                               allow_patterns=UPLOADS, commit_message="Deploy Storycut video studio")
+                               allow_patterns=UPLOADS, commit_message="Deploy StoryCut")
     print(f"Uploaded commit {result.oid}")
     print(f"Build status: https://huggingface.co/spaces/{repo}")
     print("The first build downloads the models. Check that the Space reaches RUNNING before sharing it.")

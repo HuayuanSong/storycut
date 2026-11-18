@@ -21,24 +21,38 @@ from storycut.timing import DurationMismatch, LENGTHS, plan_timing, validate_tar
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).parent
 MOTION_AVAILABLE = prepare_motion() if IS_SPACE else True
+SCENE_HEADERS = ["On-screen heading", "Spoken narration", "Image search"]
+REVISION_HEADERS = ["Scene", "Suggested narration"]
+EXAMPLE_MESSAGE = "Example storyboard loaded. This is a prewritten demo; edit it or generate your own."
 
 
-def loading_event(button, feedback, message):
-    """Show feedback in the browser before a queued request reaches the server."""
+def editor_job(name, button, feedback, message, fn, inputs, staged, outputs, *, lane=None):
+    """Run the typed API, then publish its processed values in the originating tab."""
     markup = ('<div class="job-status" role="status" aria-live="polite">'
               '<span class="job-spinner" aria-hidden="true"></span>'
               f'<span>{message}</span></div>')
-    return button.click(
-        fn=None, outputs=[button, feedback], queue=False,
-        js=f'() => [{{__type__: "update", interactive: false}}, {json.dumps(markup)}]',
+    start_outputs = [button, feedback]
+    if name == "suggest_revision":
+        start_outputs.append(outputs[0])  # Hide the earlier suggestion while its replacement runs.
+    start = button.click(
+        fn=None, outputs=start_outputs, queue=False,
+        js=f'() => window.storycutJobs.begin("{name}", {json.dumps(markup)})',
     )
-
-
-def clear_loading(event, button, feedback):
-    # Explicit failure handling also covers Gradio versions whose .then skips errors.
-    for finish in (event.success, event.failure):
-        finish(fn=None, outputs=[button, feedback], queue=False,
-               js='() => [{__type__: "update", interactive: true}, ""]')
+    job = start.then(
+        fn, inputs, staged, api_name=name, api_visibility="public" if lane else "private",
+        concurrency_limit=1, concurrency_id=lane, queue=bool(lane),
+        show_progress="minimal", show_progress_on=[feedback], trigger_mode="once",
+    )
+    # Layout selections and server-side State have no browser value to copy.
+    values = [component for component in staged if not isinstance(component, (gr.Tabs, gr.Column, gr.State))]
+    job.success(
+        fn=None, inputs=values, outputs=[*outputs, button, feedback], queue=False,
+        js=f'(...values) => window.storycutJobs.finish("{name}", {len(outputs)}, ...values)',
+    )
+    job.failure(
+        fn=None, outputs=[button, feedback], queue=False,
+        js=f'() => window.storycutJobs.release("{name}")',
+    )
 
 
 def draft(topic, notes, tone, seconds, progress=gr.Progress()):
@@ -56,10 +70,6 @@ def draft(topic, notes, tone, seconds, progress=gr.Progress()):
     if abs(board.word_count - word_budget(int(seconds))) > word_budget(int(seconds)) * 0.1:
         status += " The draft is outside the estimated word budget; a timing check will show whether it needs revision."
     return board.title, board.rows(), status, gr.Tabs(selected="edit"), seconds
-
-
-def load_example():
-    return EXAMPLE.title, EXAMPLE.rows(), "Example storyboard loaded. This is a prewritten demo; edit it or generate your own.", gr.Tabs(selected="edit"), 30
 
 
 def timing_message(durations, seconds):
@@ -157,6 +167,7 @@ def make_video(title, rows, voice, aspect, uploads, ai_motion=False, target_seco
 def build_app():
     with gr.Blocks(title="Storycut · An idea into a short film", analytics_enabled=False,
                    delete_cache=(3600, 86400)) as demo:
+        demo.load(fn=None, js=(ROOT / "assets/editor-jobs.js").read_text(), queue=False)
         with gr.Row(elem_id="masthead"):
             gr.HTML('<div class="brand"><span class="brand-mark">▰</span> storycut<span class="beta">EARLY PREVIEW</span></div>')
             if IS_SPACE:
@@ -169,12 +180,12 @@ def build_app():
             with gr.Tab("01 · Start with an idea", id="idea"):
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=3, min_width=340):
-                        topic = gr.Textbox(label="What is your video about?", placeholder="A small idea, a useful explanation, a place worth visiting…", lines=3, max_lines=5)
+                        topic = gr.Textbox(label="What is your video about?", elem_id="story-topic", placeholder="A small idea, a useful explanation, a place worth visiting…", lines=3, max_lines=5)
                         with gr.Row():
                             tone = gr.Dropdown(["Clear & curious", "Warm & reflective", "Punchy & upbeat"], value="Clear & curious", label="Voice of the story")
                             seconds = gr.Radio(list(LENGTHS), value=30, label="Target length · seconds")
                         with gr.Accordion("Add source notes · optional", open=False):
-                            notes = gr.Textbox(label="Facts you want the script to use", placeholder="Paste a few notes or an excerpt you have permission to use. Links alone are not fetched.", lines=4)
+                            notes = gr.Textbox(label="Facts you want the script to use", elem_id="source-notes", placeholder="Paste a few notes or an excerpt you have permission to use. Links alone are not fetched.", lines=4)
                         write = gr.Button("Write my storyboard  →", variant="primary", size="lg")
                         write_feedback = gr.HTML("", elem_id="storyboard-progress", elem_classes="job-feedback")
                         example = gr.Button("Explore with an example", variant="secondary")
@@ -185,8 +196,8 @@ def build_app():
                 gr.Markdown("**English narration · Portrait or landscape · Downloadable MP4**", elem_id="features")
             with gr.Tab("02 · Shape your story", id="edit"):
                 status = gr.Markdown("Start with an idea, or load the example to explore the editor.")
-                title = gr.Textbox(label="Video title", placeholder="Your title")
-                editor = gr.Dataframe(headers=["On-screen heading", "Spoken narration", "Image search"],
+                title = gr.Textbox(label="Video title", elem_id="story-title", placeholder="Your title")
+                editor = gr.Dataframe(headers=SCENE_HEADERS, elem_id="storyboard-editor",
                                       datatype="str", type="array", row_count=4,
                                       column_count=3, wrap=True, interactive=True,
                                       column_widths=["22%", "53%", "25%"], show_row_numbers=True,
@@ -205,7 +216,7 @@ def build_app():
                 revision_state = gr.State(None)
                 with gr.Column(visible=False) as revision_panel:
                     revision_status = gr.Markdown()
-                    revision_rows = gr.Dataframe(headers=["Scene", "Suggested narration"],
+                    revision_rows = gr.Dataframe(headers=REVISION_HEADERS,
                                                  datatype="str", type="array", interactive=False, wrap=True)
                     with gr.Row():
                         accept = gr.Button("Use this revision", variant="primary")
@@ -223,8 +234,8 @@ def build_app():
                     "Generated details can differ from the original photo. "
                     "By enabling AI motion, you agree to the [LTX model use terms](https://huggingface.co/Lightricks/LTX-Video/blob/main/LTX-Video-Open-Weights-License-0.X.txt).",
                     visible=False)
-                ai_motion.change(lambda enabled: gr.update(visible=enabled), ai_motion, motion_info,
-                                 queue=False, api_name=False)
+                ai_motion.change(fn=None, inputs=ai_motion, outputs=motion_info, queue=False,
+                                 js='enabled => [{__type__: "update", visible: enabled}]')
                 if not MOTION_AVAILABLE:
                     gr.Markdown("AI motion is temporarily unavailable. You can still create photo videos.")
                 render = gr.Button("Make my video  →", variant="primary", size="lg")
@@ -238,50 +249,53 @@ def build_app():
                     gallery = gr.Gallery(label="Scene images", columns=4, height=230, interactive=False)
                 gr.Markdown("Keep **credits.txt** with your video when sharing Commons images. Downloads are temporary; save anything you want to keep.")
         gr.HTML('<footer class="foot"><span>Made with open models. Finished by you.</span><span>Qwen · Kokoro · LTX-Video · Wikimedia Commons</span></footer>')
-        writing = loading_event(write, write_feedback,
-                                "Writing your storyboard… A GPU may need to become available first.")
-        writing = writing.then(draft, [topic, notes, tone, seconds], [title, editor, status, tabs, edit_seconds],
-                               concurrency_limit=1, concurrency_id="writer", api_name="draft",
-                               show_progress="minimal", show_progress_on=[write_feedback])
-        clear_loading(writing, write, write_feedback)
-        example.click(load_example, outputs=[title, editor, status, tabs, edit_seconds], queue=False, api_name=False)
-        # User-only input events avoid a feedback loop between the two controls.
-        seconds.input(lambda value: value, seconds, edit_seconds, queue=False, api_name=False)
-        edit_seconds.change(lambda value: value, edit_seconds, seconds, queue=False, api_name=False)
-        checking = loading_event(check, length_feedback, "Checking narration length with your selected voice…")
-        checking = checking.then(check_narration, [title, editor, voice, edit_seconds],
-                                 [length_status, narration, revise], concurrency_limit=1,
-                                 concurrency_id="renderer", api_name="check_narration",
-                                 show_progress="minimal", show_progress_on=[length_feedback])
-        clear_loading(checking, check, length_feedback)
-        revising = loading_event(revise, revision_feedback, "Preparing a suggested revision… Your current script stays unchanged.")
-        revising = revising.then(suggest_revision, [title, editor, voice, edit_seconds, notes],
-                                 [revision_panel, revision_rows, revision_status, revision_state],
-                                 concurrency_limit=1, concurrency_id="renderer", api_name="suggest_revision",
-                                 show_progress="minimal", show_progress_on=[revision_feedback])
-        clear_loading(revising, revise, revision_feedback)
-        accept.click(accept_revision, [title, editor, voice, edit_seconds, revision_state],
-                     [editor, status, revision_state, revision_panel], queue=False, api_name=False)
-        discard.click(lambda: (None, gr.update(visible=False)), outputs=[revision_state, revision_panel],
-                      queue=False, api_name=False)
-        rendering = loading_event(render, render_feedback,
-                                  "Making your video… Preparing your scenes. AI motion may also need to wait for a GPU.")
-        rendering = rendering.then(make_video, [title, editor, voice, aspect, uploads, ai_motion, edit_seconds],
-                                    [video, bundle, gallery, result, tabs], concurrency_limit=1,
-                                    concurrency_id="renderer", api_name="render",
-                                    show_progress="minimal", show_progress_on=[render_feedback])
-        clear_loading(rendering, render, render_feedback)
-        # An old video must never look like the output of newly edited settings.
-        def stale():
-            return None, None, [], "Your storyboard changed. Render again to see the updated video."
-        for control in (title, editor, voice, aspect, uploads, ai_motion, edit_seconds):
-            control.change(stale, outputs=[video, bundle, gallery, result], queue=False, api_name=False)
-        for control in (title, editor, voice, edit_seconds):
-            control.change(lambda: ("Narration or target changed. Check the length again before rendering.",
-                                     gr.update(value=None, visible=False), gr.update(value="Revise script to fit", interactive=False),
-                                     None, gr.update(visible=False)),
-                           outputs=[length_status, narration, revise, revision_state, revision_panel],
-                           queue=False, api_name=False)
+        # Typed staging retains Gradio's normal file processing and the public API
+        # response formats. No queued job writes directly to an editable field.
+        with gr.Column(visible=False):
+            staging_tabs = gr.Tabs()
+            staging_panel = gr.Column()
+            draft_outputs = [gr.Textbox(label=title.label), gr.Dataframe(headers=SCENE_HEADERS, label=editor.label),
+                             gr.Markdown(), staging_tabs, gr.Radio(list(LENGTHS), label=edit_seconds.label)]
+            timing_outputs = [gr.Markdown(), gr.Audio(type="filepath", label=narration.label), gr.Button()]
+            revision_outputs = [staging_panel, gr.Dataframe(headers=REVISION_HEADERS), gr.Markdown(), revision_state]
+            accepted_outputs = [gr.Dataframe(headers=SCENE_HEADERS), gr.Markdown(), revision_state, staging_panel]
+            render_outputs = [gr.Video(label=video.label), gr.File(label=bundle.label),
+                              gr.Gallery(label=gallery.label), gr.Markdown(), staging_tabs]
+
+        video_fields = [video, bundle, gallery, result]
+        timing_fields = [length_status, narration, revise]
+        edited_fields = [*video_fields, *timing_fields, revision_panel]
+        project_fields = [title, editor, status, tabs, edit_seconds, uploads, ai_motion, *edited_fields]
+        script_inputs = [title, editor, voice, edit_seconds]
+        editor_job("draft", write, write_feedback, "Writing your storyboard… A GPU may need to become available first.",
+                   draft, [topic, notes, tone, seconds], draft_outputs, project_fields, lane="writer")
+        editor_job("check_narration", check, length_feedback, "Checking narration length with your selected voice…",
+                   check_narration, script_inputs, timing_outputs, timing_fields, lane="renderer")
+        editor_job("suggest_revision", revise, revision_feedback, "Preparing a suggested revision…",
+                   suggest_revision, [*script_inputs, notes], revision_outputs,
+                   [revision_panel, revision_rows, revision_status], lane="renderer")
+        editor_job("accept_revision", accept, revision_feedback, "Applying your revision…",
+                   accept_revision, [*script_inputs, revision_state], accepted_outputs, [editor, status, *edited_fields])
+        editor_job("render", render, render_feedback,
+                   "Making your video… Preparing your scenes. AI motion may also need to wait for a GPU.",
+                   make_video, [title, editor, voice, aspect, uploads, ai_motion, edit_seconds],
+                   render_outputs, [*video_fields, tabs], lane="renderer")
+
+        example_values = [EXAMPLE.title, {"headers": SCENE_HEADERS, "data": EXAMPLE.rows(), "metadata": None},
+                          EXAMPLE_MESSAGE, 30]
+        example.click(fn=None, outputs=project_fields, queue=False,
+                      js=f'() => window.storycutJobs.project(...{json.dumps(example_values)})')
+        # Invalidate in the tab. Replacing a project also clears dependent fields
+        # explicitly so loading an identical example still resets the workspace.
+        gr.on([control.change for control in script_inputs] + [seconds.input], fn=None, outputs=edited_fields,
+              js="() => window.storycutJobs.scriptChanged()", queue=False)
+        gr.on([aspect.change, uploads.change, ai_motion.change], fn=None, outputs=video_fields,
+              js="() => window.storycutJobs.mediaChanged()", queue=False)
+        gr.on([topic.change, tone.change], fn=None, js='() => window.storycutJobs.invalidate("draft")', queue=False)
+        notes.change(fn=None, outputs=revision_panel, js='() => window.storycutJobs.notesChanged()', queue=False)
+        discard.click(fn=None, outputs=revision_panel, js='() => window.storycutJobs.discard()', queue=False)
+        seconds.input(fn=None, inputs=seconds, outputs=edit_seconds, js="value => value", queue=False)
+        edit_seconds.change(fn=None, inputs=edit_seconds, outputs=seconds, js="value => value", queue=False)
     return demo
 
 

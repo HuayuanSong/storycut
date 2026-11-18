@@ -1,5 +1,6 @@
 """One bounded GPU call for text; speech stays on CPU."""
 
+import json
 import math
 import os
 import re
@@ -99,10 +100,15 @@ def revision_messages(board: Storyboard, words: int, notes: str):
         " Keep the existing language, tone, meaning, scene order, headings and image subjects. "
         "Do not invent claims to fill time. Use English throughout. The revised text will be reviewed before use."
     )
+    context = board.model_dump()
+    if append:
+        for scene in context["scenes"]:
+            scene["already_spoken"] = scene.pop("narration")
+        prompt += " The already_spoken fields are read-only context. Start each narration with the new detail."
     return [
         {"role": "system", "content": prompt},
         {"role": "user", "content": f"Current draft: {board.word_count} spoken words. Final target: {words}.\n"
-         f"Storyboard: {board.model_dump_json()}\nSource notes: {notes or '(none)'}"},
+         f"Storyboard: {json.dumps(context, ensure_ascii=False)}\nSource notes: {notes or '(none)'}"},
     ], append
 
 
@@ -114,7 +120,15 @@ def combine_revision(board: Storyboard, candidate: Storyboard, append: bool,
     if append:
         narrations = [scene.narration for scene in board.scenes]
         remaining = min(MAX_WORDS, word_limit) - board.word_count
-        additions = [re.split(r"(?<=[.!?])\s+", scene.narration) for scene in candidate.scenes]
+        def split_sentences(text):
+            return re.split(r"(?<=[.!?])\s+", text.strip())
+
+        def sentence_key(text):
+            return tuple(re.findall(r"\w+", text.casefold()))
+
+        spoken = {sentence_key(sentence) for text in narrations for sentence in split_sentences(text)}
+        additions = [split_sentences(scene.narration) for scene in candidate.scenes]
+        added = False
         # The model may overrun its requested addition budget. Select complete
         # sentences in scene order, never clipping a sentence or the user's text.
         for sentence_index in range(max(map(len, additions))):
@@ -122,6 +136,9 @@ def combine_revision(board: Storyboard, candidate: Storyboard, append: bool,
                 if sentence_index >= len(sentences):
                     continue
                 sentence = sentences[sentence_index]
+                key = sentence_key(sentence)
+                if not key or key in spoken:
+                    continue
                 count = len(sentence.split())
                 extended = f"{narrations[index]} {sentence}"
                 if count > remaining or len(extended) > 500:
@@ -129,6 +146,10 @@ def combine_revision(board: Storyboard, candidate: Storyboard, append: bool,
                     continue
                 narrations[index] = extended
                 remaining -= count
+                spoken.add(key)
+                added = True
+        if not added:
+            raise ValueError("The model did not add any new narration that fits. Try a different revision or edit the script yourself.")
     return Storyboard(title=board.title, scenes=[
         {**original.model_dump(), "narration": narration}
         for original, narration in zip(board.scenes, narrations, strict=True)

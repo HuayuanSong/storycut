@@ -25,7 +25,8 @@ def test_invalid_brief_does_not_lease_gpu(monkeypatch, topic):
 
 def board_with_words(count):
     return EXAMPLE.model_copy(update={"scenes": [
-        scene.model_copy(update={"narration": "word " * count}) for scene in EXAMPLE.scenes
+        scene.model_copy(update={"narration": f"Scene{index} " + "word " * (count - 2) + "ends."})
+        for index, scene in enumerate(EXAMPLE.scenes)
     ]})
 
 
@@ -41,6 +42,7 @@ def test_short_draft_gets_one_bounded_correction(monkeypatch):
     assert result.word_count == 196
     assert len(calls) == 2
     assert "40 spoken words" in calls[1][-1]["content"]
+    assert '"already_spoken"' in calls[1][-1]["content"]
 
 
 def test_failed_correction_keeps_the_valid_draft(monkeypatch):
@@ -96,3 +98,21 @@ def test_overlong_additions_keep_user_text_and_only_include_complete_sentences()
     for before, after in zip(original.scenes, revised.scenes, strict=True):
         assert after.narration.startswith(before.narration)
         assert after.narration.endswith(".")
+
+
+def test_expansion_rejects_a_repeated_script():
+    with pytest.raises(ValueError, match="did not add any new narration"):
+        models.combine_revision(EXAMPLE, EXAMPLE, True)
+
+
+def test_expansion_keeps_only_new_sentences_across_scenes():
+    first = "SOME DAYS, a change of scenery starts with a single step!"
+    new = "Listen for the sound of the wind."
+    candidates = [f"{first} {new}", new, first, new]
+    candidate = EXAMPLE.model_copy(update={"scenes": [
+        scene.model_copy(update={"narration": text}) for scene, text in zip(EXAMPLE.scenes, candidates)
+    ]})
+    result = models.combine_revision(EXAMPLE, candidate, True)
+    assert result.scenes[0].narration == EXAMPLE.scenes[0].narration
+    assert result.scenes[1].narration == f"{EXAMPLE.scenes[1].narration} {new}"
+    assert result.scenes[2:] == EXAMPLE.scenes[2:]

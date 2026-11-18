@@ -42,4 +42,27 @@ table td, table th { font-family: Arial, sans-serif !important; }
 .idea-card p { color: #586650; font-size: 15px; line-height: 1.6; }
 #features { margin-top: 20px; color: #5b6953; font-size: 13px; }
 .foot { display: flex; justify-content: space-between; gap: 20px; padding: 23px 0; font-size: 12px; color: #687361; }
+body.dark { color-scheme: dark; background: #17211d; }
+.dark .gradio-container {
+    background: #17211d !important;
+    color: #edf4ec !important;
+    --body-background-fill: #17211d;
+    --background-fill-primary: #202e27;
+    --background-fill-secondary: #2a3931;
+    --block-background-fill: #202e27;
+    --input-background-fill: #19251f;
+    --border-color-primary: #53675a;
+    --body-text-color: #edf4ec;
+    --body-text-color-subdued: #c1d1c2;
+    --block-label-text-color: #c1d1c2;
+    --input-text-color: #edf4ec;
+}
+.dark #workspace { background: #202e27; border-color: #53675a; }
+.dark #workspace > .tab-nav, .dark .idea-card { background: #2a3931; }
+.dark #masthead, .dark .beta { border-color: #53675a; }
+.dark .intro h1, .dark .brand, .dark .idea-card h3 { color: #edf4ec; }
+.dark .intro em, .dark .eyebrow, .dark .card-top { color: #c8e2a9; }
+.dark .lede, .dark .idea-card p, .dark .foot, .dark #features { color: #c1d1c2; }
+.dark #workspace [role="tab"][aria-selected="true"] { color: #d9f4b3 !important; border-bottom-color: #a7cf84 !important; }
+.dark .job-status { background: #2a3931; color: #e2f0d8; }
 @media (max-width: 650px) { .gradio-container { padding: 18px 14px !important; } .intro { padding: 32px 2px 27px; } .intro h1 { letter-spacing: -1.8px; } .lede { font-size: 17px; } .steps { font-size: 12px; gap: 10px; } #workspace > .tabitem { padding: 17px; } .tab-nav button { padding: 12px 8px !important; font-size: 12px !important; } .foot { flex-direction: column; gap: 5px; } }

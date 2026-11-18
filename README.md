@@ -28,6 +28,8 @@ Choose a 30-, 45-, or 60-second target. **Check narration length** measures real
 
 Enable **Animate images with AI** in the editor for generated moving footage. LTX-Video uses each source image and its scene's heading, narration and image-search subject to create a short shot. The option is off by default; photo mode remains available without a video-generation GPU call.
 
+You can keep editing while a job runs. The editor applies a result only while it matches your current work. Loading the example or generating a replacement storyboard clears uploaded images and resets AI motion. Revising the current story keeps its images. Script expansion filters out sentences already spoken or added elsewhere in the suggestion.
+
 ## How it works
 
 ```mermaid
@@ -99,6 +101,8 @@ Free ZeroGPU hosting requires an eligible personal account with verified email a
 ```
 
 Tests cover malformed model responses, bounded correction, revision acceptance, speech-cache invalidation, timing mismatch rejection, image validation, licensing filters, caption timestamps, failed-job cleanup, and actual FFmpeg exports. Timed exports check 30/45/60-second output, subtitle retiming, preserved audio pitch and the final spoken audio. Offline AI-motion tests use synthetic moving frames; an actual hosted model generation is a separate smoke test.
+
+With Playwright Chromium installed, run `.venv/bin/python tests/check_editor_jobs.py` to exercise edits during queued jobs and the complete revision and download flow in a local browser. The script accepts `PLAYWRIGHT_EXECUTABLE_PATH` for an existing Chrome installation. [November 2026 code review](docs/code-review-2026-11-18.md)
 
 `STORYCUT_MODEL` and `STORYCUT_MODEL_REVISION` can select another compatible Transformers model. Default text/speech models are revision-pinned; dependencies are version-pinned. `STORYCUT_DEVICE` overrides local device selection. `PORT` changes the local listening port.
 
