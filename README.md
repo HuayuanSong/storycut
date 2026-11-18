@@ -104,7 +104,7 @@ Tests cover malformed model responses, bounded correction, revision acceptance, 
 
 With Playwright Chromium installed, run `.venv/bin/python tests/check_editor_jobs.py` to exercise edits during queued jobs and the complete revision and download flow in a local browser. The script accepts `PLAYWRIGHT_EXECUTABLE_PATH` for an existing Chrome installation. [November 2026 code review](docs/code-review-2026-11-18.md)
 
-`STORYCUT_MODEL` and `STORYCUT_MODEL_REVISION` can select another compatible Transformers model. Default text/speech models are revision-pinned; dependencies are version-pinned. `STORYCUT_DEVICE` overrides local device selection. `PORT` changes the local listening port.
+`STORYCUT_MODEL` and `STORYCUT_MODEL_REVISION` can select another compatible Transformers model. The default text and speech models use pinned revisions. The Hugging Face builder supplies its exact ZeroGPU SDK version. Local development pins the tested SDK in `requirements-dev.txt`. `STORYCUT_DEVICE` overrides local device selection. `PORT` changes the local listening port.
 
 ## Credits
 
